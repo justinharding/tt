@@ -18,12 +18,6 @@ const (
 
 var timeLogFile string
 
-type GroupNode struct {
-	Name     string
-	Total    float64
-	Children map[string]*GroupNode
-}
-
 // Entry represents a parsed log entry
 type Entry struct {
 	Project  string
@@ -48,7 +42,7 @@ func main() {
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		switch arg {
-		case "-group":
+		case "-g", "-group":
 			group = true
 		case "-file":
 			if i+1 < len(os.Args) {
