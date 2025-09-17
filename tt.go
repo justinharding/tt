@@ -15,6 +15,8 @@ const (
 	endOfDatePos   = 21
 )
 
+var timeLogFile string
+
 type GroupNode struct {
 	Name     string
 	Total    float64
@@ -33,81 +35,53 @@ func main() {
 		usage()
 		return
 	}
-	action := os.Args[1]
-	args := os.Args[2:]
-
-	group := false
-	if len(args) > 0 && args[len(args)-1] == "group" {
-		group = true
-		args = args[:len(args)-1]
-	}
-	if strings.HasPrefix(action, "last") && strings.TrimLeft(action[len("last"):], "^") == "" {
-		count := 1 + strings.Count(action[len("last"):], "^")
-		if len(args) > 0 {
-			fmt.Sscanf(args[0], "%d", &count)
-		}
-		if proj, err := lastProjectN(count); err == nil {
-			fmt.Println("Last closed project:", proj)
-		} else {
-			fmt.Println("Error:", err)
-		}
-		return
-	}
-	if strings.HasPrefix(action, "yd") && strings.TrimLeft(action[len("yd"):], "^") == "" {
-		count := 1 + strings.Count(action[len("yd"):], "^")
-		hours, _, _, entries, err := hoursForDay(count, group)
-		if err != nil {
-			fmt.Println("Error:", err)
-		} else if group {
-			// DisplayFlatTotals(projectNames, projectPaths)
-			DisplayHierTotals(entries)
-			// fmt.Printf("Total hours: %.2f\n", hours)
-			// fmt.Println("Group breakdown:")
-			// for k, v := range groups {
-			// 	fmt.Printf("  %s: %.2f\n", k, v)
-			// }
-		} else {
-			fmt.Printf("Hours worked %d days ago: %.2f\n", count, hours)
-		}
-
-		// hours, err := hoursForDay(count)
-		// if err != nil {
-		// 	fmt.Println("Error:", err)
-		// } else {
-		// 	fmt.Printf("Hours worked %d days ago: %.2f\n", count, hours)
-		// }
-		return
-	}
-
-	if strings.HasPrefix(action, "lw") && strings.TrimLeft(action[len("lw"):], "^") == "" {
-		count := strings.Count(action[len("lw"):], "^")
-		if len(args) > 0 {
-			fmt.Sscanf(args[0], "%d", &count)
-		}
-		hours, err := hoursForWeek(count)
-		if err != nil {
-			fmt.Println("Error:", err)
-		} else {
-			if count == 0 {
-				fmt.Printf("Hours worked this week: %.2f\n", hours)
-			} else if count == 1 {
-				fmt.Printf("Hours worked last week: %.2f\n", hours)
+	// Parse flags and arguments
+	var (
+		group  bool
+		file   string
+		action string
+		args   []string
+	)
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		switch arg {
+		case "-group":
+			group = true
+		case "-file":
+			if i+1 < len(os.Args) {
+				file = os.Args[i+1]
+				i++
+			}
+		default:
+			if action == "" {
+				action = arg
 			} else {
-				fmt.Printf("Hours worked %d weeks ago: %.2f\n", count, hours)
+				args = append(args, arg)
 			}
 		}
-		return
+	}
+	// If file not set, check if last arg is a filename (not an action or flag)
+	if file == "" && len(args) > 0 && !strings.HasPrefix(args[len(args)-1], "-") {
+		file = args[len(args)-1]
+		args = args[:len(args)-1]
 	}
 
-	if strings.HasPrefix(action, "cat") && strings.TrimLeft(action[len("cat"):], "^") == "" {
-		count := 1 + strings.Count(action[len("cat"):], "^")
-		if len(args) > 0 {
-			fmt.Sscanf(args[0], "%d", &count)
-		}
-		err := CatInEntries(count)
-		if err != nil {
-			fmt.Println("Error:", err)
-		}
+	if file != "" {
+		timeLogFile = file
+	}
+
+	switch {
+	case strings.HasPrefix(action, "last") && strings.TrimLeft(action[len("last"):], "^") == "":
+		handleLast(action, args)
+		return
+	case strings.HasPrefix(action, "yd") && strings.TrimLeft(action[len("yd"):], "^") == "":
+		handleYd(action, args, group)
+		return
+	case strings.HasPrefix(action, "lw") && strings.TrimLeft(action[len("lw"):], "^") == "":
+		handleLw(action, args, group)
+		return
+	case strings.HasPrefix(action, "cat") && strings.TrimLeft(action[len("cat"):], "^") == "":
+		handleCat(action, args)
 		return
 	}
 
@@ -214,9 +188,11 @@ func main() {
 		}
 
 	case "thisweek", "tw":
-		hours, err := hoursThisWeek()
+		hours, _, _, entries, err := hoursThisWeek(group)
 		if err != nil {
 			fmt.Println("Error:", err)
+		} else if group {
+			DisplayHierTotals(entries)
 		} else {
 			fmt.Printf("Hours worked this week: %.2f\n", hours)
 		}
@@ -239,10 +215,71 @@ Actions:
 }
 
 func getTimelogFile() string {
+	if timeLogFile != "" {
+		return timeLogFile
+	}
+
 	if f := os.Getenv("TIMELOG"); f != "" {
 		return f
 	}
 	return "timelog.txt"
+}
+
+func handleLast(action string, args []string) {
+	count := 1 + strings.Count(action[len("last"):], "^")
+	if len(args) > 0 {
+		fmt.Sscanf(args[0], "%d", &count)
+	}
+	if proj, err := lastProjectN(count); err == nil {
+		fmt.Println("Last closed project:", proj)
+	} else {
+		fmt.Println("Error:", err)
+	}
+}
+
+func handleYd(action string, args []string, group bool) {
+	count := 1 + strings.Count(action[len("yd"):], "^")
+	hours, _, _, entries, err := hoursForDay(count, group)
+	if err != nil {
+		fmt.Println("Error:", err)
+	} else if group {
+		DisplayHierTotals(entries)
+	} else {
+		fmt.Printf("Hours worked %d days ago: %.2f\n", count, hours)
+	}
+}
+
+func handleLw(action string, args []string, group bool) {
+	count := strings.Count(action[len("lw"):], "^")
+	if len(args) > 0 {
+		fmt.Sscanf(args[0], "%d", &count)
+	}
+	hours, _, _, entries, err := hoursForWeek(count, group)
+	if err != nil {
+		fmt.Println("Error:", err)
+	} else if group {
+		DisplayHierTotals(entries)
+	} else {
+		switch count {
+		case 0:
+			fmt.Printf("Hours worked this week: %.2f\n", hours)
+		case 1:
+			fmt.Printf("Hours worked last week: %.2f\n", hours)
+		default:
+			fmt.Printf("Hours worked %d weeks ago: %.2f\n", count, hours)
+		}
+	}
+}
+
+func handleCat(action string, args []string) {
+	count := 1 + strings.Count(action[len("cat"):], "^")
+	if len(args) > 0 {
+		fmt.Sscanf(args[0], "%d", &count)
+	}
+	err := CatInEntries(count)
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
 }
 
 func clockIn(project string) error {
@@ -416,15 +453,12 @@ func hoursToday(group bool) (float64, map[string]float64, map[string]map[string]
 	return hoursForDay(0, group)
 }
 
-// Returns hours worked for N days ago (0 = today, 1 = yesterday, etc)
-func hoursForDay(daysAgo int, group bool) (float64, map[string]float64, map[string]map[string]float64, []string, error) {
+func hoursForRange(startDate, endDate string, group bool) (float64, map[string]float64, map[string]map[string]float64, []string, error) {
 	f, err := os.Open(getTimelogFile())
 	if err != nil {
 		return 0, nil, nil, nil, err
 	}
 	defer f.Close()
-
-	targetDate := time.Now().AddDate(0, 0, -daysAgo).Format("2006-01-02")
 
 	var inTimes, outTimes []time.Time
 	var inProjects []string
@@ -438,16 +472,18 @@ func hoursForDay(daysAgo int, group bool) (float64, map[string]float64, map[stri
 		}
 		date := parts[1]
 		datetime := parts[1] + " " + parts[2]
-		if strings.HasPrefix(line, "i ") && strings.HasPrefix(date, targetDate) {
+		if date < startDate || date > endDate {
+			continue
+		}
+		if strings.HasPrefix(line, "i ") {
 			t, err := time.Parse("2006-01-02 15:04:05", datetime)
 			if err == nil {
 				inTimes = append(inTimes, t)
-				// Project name is everything after the timestamp
 				project := strings.Join(parts[3:], " ")
 				inProjects = append(inProjects, project)
 			}
 		}
-		if strings.HasPrefix(line, "o ") && strings.HasPrefix(date, targetDate) {
+		if strings.HasPrefix(line, "o ") {
 			t, err := time.Parse("2006-01-02 15:04:05", datetime)
 			if err == nil {
 				outTimes = append(outTimes, t)
@@ -455,7 +491,6 @@ func hoursForDay(daysAgo int, group bool) (float64, map[string]float64, map[stri
 		}
 	}
 
-	// Pair up ins and outs
 	var entries []string
 	var total float64
 	for i := 0; i < len(inTimes) && i < len(outTimes); i++ {
@@ -466,125 +501,42 @@ func hoursForDay(daysAgo int, group bool) (float64, map[string]float64, map[stri
 		}
 	}
 
-	// fmt.Printf("jh entries %v\n", entries)
 	if group {
-		// return total, groupTotals(entries), nil
 		projectTotals, projectPaths := groupFlatTotals(entries)
 		return total, projectTotals, projectPaths, entries, nil
 	}
-	return total, nil, nil, nil, nil
+	return total, nil, nil, entries, nil
 }
 
-func hoursThisWeek() (float64, error) {
-	f, err := os.Open(getTimelogFile())
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
+func hoursForDay(daysAgo int, group bool) (float64, map[string]float64, map[string]map[string]float64, []string, error) {
+	targetDate := time.Now().AddDate(0, 0, -daysAgo).Format("2006-01-02")
+	return hoursForRange(targetDate, targetDate, group)
+}
 
+func hoursThisWeek(group bool) (float64, map[string]float64, map[string]map[string]float64, []string, error) {
 	now := time.Now()
-	// Find Monday of this week
 	offset := int(now.Weekday())
-	if offset == 0 { // Sunday
+	if offset == 0 {
 		offset = 6
 	} else {
 		offset = offset - 1
 	}
 	monday := now.AddDate(0, 0, -offset)
-	mondayDate := monday.Format("2006-01-02")
-
-	var inTimes, outTimes []time.Time
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Fields(line)
-		if len(parts) < 3 {
-			continue
-		}
-		date := parts[1]
-		datetime := parts[1] + " " + parts[2]
-		if date < mondayDate {
-			continue
-		}
-		if strings.HasPrefix(line, "i ") {
-			t, err := time.Parse("2006-01-02 15:04:05", datetime)
-			if err == nil {
-				inTimes = append(inTimes, t)
-			}
-		}
-		if strings.HasPrefix(line, "o ") {
-			t, err := time.Parse("2006-01-02 15:04:05", datetime)
-			if err == nil {
-				outTimes = append(outTimes, t)
-			}
-		}
-	}
-
-	var total float64
-	for i := 0; i < len(inTimes) && i < len(outTimes); i++ {
-		dur := outTimes[i].Sub(inTimes[i]).Hours()
-		if dur > 0 {
-			total += dur
-		}
-	}
-	return total, nil
+	sunday := monday.AddDate(0, 0, 6)
+	return hoursForRange(monday.Format("2006-01-02"), sunday.Format("2006-01-02"), group)
 }
 
-func hoursForWeek(weeksAgo int) (float64, error) {
-	f, err := os.Open(getTimelogFile())
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
+func hoursForWeek(weeksAgo int, group bool) (float64, map[string]float64, map[string]map[string]float64, []string, error) {
 	now := time.Now()
-	// Find Monday of this week
 	offset := int(now.Weekday())
-	if offset == 0 { // Sunday
+	if offset == 0 {
 		offset = 6
 	} else {
 		offset = offset - 1
 	}
 	monday := now.AddDate(0, 0, -offset-7*weeksAgo)
 	sunday := monday.AddDate(0, 0, 6)
-	mondayDate := monday.Format("2006-01-02")
-	sundayDate := sunday.Format("2006-01-02")
-
-	var inTimes, outTimes []time.Time
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Fields(line)
-		if len(parts) < 3 {
-			continue
-		}
-		date := parts[1]
-		datetime := parts[1] + " " + parts[2]
-		if date < mondayDate || date > sundayDate {
-			continue
-		}
-		if strings.HasPrefix(line, "i ") {
-			t, err := time.Parse("2006-01-02 15:04:05", datetime)
-			if err == nil {
-				inTimes = append(inTimes, t)
-			}
-		}
-		if strings.HasPrefix(line, "o ") {
-			t, err := time.Parse("2006-01-02 15:04:05", datetime)
-			if err == nil {
-				outTimes = append(outTimes, t)
-			}
-		}
-	}
-
-	var total float64
-	for i := 0; i < len(inTimes) && i < len(outTimes); i++ {
-		dur := outTimes[i].Sub(inTimes[i]).Hours()
-		if dur > 0 {
-			total += dur
-		}
-	}
-	return total, nil
+	return hoursForRange(monday.Format("2006-01-02"), sunday.Format("2006-01-02"), group)
 }
 
 func addEntry(root *GroupNode, segments []string, hours float64) {
