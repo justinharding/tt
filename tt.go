@@ -35,13 +35,15 @@ func main() {
 		usage()
 		return
 	}
-	// Parse flags and arguments
+
 	var (
 		group  bool
 		file   string
 		action string
 		args   []string
 	)
+
+	// Parse flags and arguments, allowing flags anywhere
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		switch arg {
@@ -53,6 +55,10 @@ func main() {
 				i++
 			}
 		default:
+			if strings.HasPrefix(arg, "-") {
+				// Unknown flag, skip
+				continue
+			}
 			if action == "" {
 				action = arg
 			} else {
@@ -60,6 +66,7 @@ func main() {
 			}
 		}
 	}
+
 	// If file not set, check if last arg is a filename (not an action or flag)
 	if file == "" && len(args) > 0 && !strings.HasPrefix(args[len(args)-1], "-") {
 		file = args[len(args)-1]
@@ -70,6 +77,7 @@ func main() {
 		timeLogFile = file
 	}
 
+	// Dispatch tagged actions
 	switch {
 	case strings.HasPrefix(action, "last") && strings.TrimLeft(action[len("last"):], "^") == "":
 		handleLast(action, args)
@@ -85,8 +93,9 @@ func main() {
 		return
 	}
 
+	// Dispatch regular actions
 	switch action {
-	case "in":
+	case "in", "sw", "switch":
 		var project string
 		if len(args) > 0 {
 			project = strings.Join(args, " ")
@@ -109,40 +118,20 @@ func main() {
 			}
 			project = projects[choice-1]
 		}
-		if err := clockIn(project); err != nil {
-			fmt.Println("Error:", err)
-			os.Exit(1)
+		if action == "in" {
+			if err := clockIn(project); err != nil {
+				fmt.Println("Error:", err)
+				os.Exit(1)
+			}
+		} else {
+			if err := switchProject(project); err != nil {
+				fmt.Println("Error:", err)
+				os.Exit(1)
+			}
 		}
 	case "out":
 		project := strings.Join(args, " ")
 		if err := clockOut(project); err != nil {
-			fmt.Println("Error:", err)
-			os.Exit(1)
-		}
-	case "sw", "switch":
-		var project string
-		if len(args) > 0 {
-			project = strings.Join(args, " ")
-		} else {
-			projects, err := lastNProjects(10)
-			if err != nil || len(projects) == 0 {
-				fmt.Println("No previous projects found.")
-				os.Exit(1)
-			}
-			fmt.Println("Select a project:")
-			for i, p := range projects {
-				fmt.Printf("%d: %s\n", i+1, p)
-			}
-			fmt.Print("Enter number: ")
-			var choice int
-			_, err = fmt.Scanf("%d", &choice)
-			if err != nil || choice < 1 || choice > len(projects) {
-				fmt.Println("Invalid selection.")
-				os.Exit(1)
-			}
-			project = projects[choice-1]
-		}
-		if err := switchProject(project); err != nil {
 			fmt.Println("Error:", err)
 			os.Exit(1)
 		}
@@ -171,13 +160,11 @@ func main() {
 		} else {
 			fmt.Printf("Hours worked today: %.2f\n", hours)
 		}
-
 	case "hoursago", "yd":
 		var days int
 		if len(args) > 0 {
 			fmt.Sscanf(args[0], "%d", &days)
 		}
-
 		hours, _, _, entries, err := hoursForDay(days, group)
 		if err != nil {
 			fmt.Println("Error:", err)
@@ -186,7 +173,6 @@ func main() {
 		} else {
 			fmt.Printf("Hours worked %d days ago: %.2f\n", days, hours)
 		}
-
 	case "thisweek", "tw":
 		hours, _, _, entries, err := hoursThisWeek(group)
 		if err != nil {
@@ -408,10 +394,6 @@ func lastProjectN(count int) (string, error) {
 	return lastIn, nil
 }
 
-func actionHasPrefixWithCarets(prefix, action string) bool {
-	return strings.HasPrefix(action, prefix) && strings.TrimLeft(action[len(prefix):], "^") == ""
-}
-
 func lastNProjects(n int) ([]string, error) {
 	f, err := os.Open(getTimelogFile())
 	if err != nil {
@@ -539,57 +521,6 @@ func hoursForWeek(weeksAgo int, group bool) (float64, map[string]float64, map[st
 	return hoursForRange(monday.Format("2006-01-02"), sunday.Format("2006-01-02"), group)
 }
 
-func addEntry(root *GroupNode, segments []string, hours float64) {
-	node := root
-	for _, seg := range segments {
-		if node.Children == nil {
-			node.Children = make(map[string]*GroupNode)
-		}
-		if _, ok := node.Children[seg]; !ok {
-			node.Children[seg] = &GroupNode{Name: seg}
-		}
-		node = node.Children[seg]
-		node.Total += hours
-	}
-}
-
-func groupTotals(entries []string) *GroupNode {
-	root := &GroupNode{Name: "root"}
-	for _, entry := range entries {
-		parts := strings.Fields(entry)
-		if len(parts) < 2 {
-			continue
-		}
-		project := parts[1]
-		segments := strings.Split(project, ":")
-		duration, err := time.ParseDuration(parts[0] + "h")
-		if err != nil {
-			continue
-		}
-		addEntry(root, segments, duration.Hours())
-	}
-	return root
-}
-
-func printGroup(node *GroupNode, indent int) {
-	if node.Name != "root" {
-		fmt.Printf("%*s%6.2fh  %s\n", indent, "", node.Total, node.Name)
-	}
-	for _, child := range node.Children {
-		printGroup(child, indent+2)
-	}
-}
-
-func DisplayTotals(root *GroupNode) {
-	var total float64
-	for _, child := range root.Children {
-		total += child.Total
-		printGroup(child, 0)
-	}
-	fmt.Println("--------------------")
-	fmt.Printf("%6.2fh\n", total)
-}
-
 func groupFlatTotals(entries []string) (map[string]float64, map[string]map[string]float64) {
 	projectTotals := make(map[string]float64)
 	projectPaths := make(map[string]map[string]float64)
@@ -612,25 +543,6 @@ func groupFlatTotals(entries []string) (map[string]float64, map[string]map[strin
 		projectPaths[project][path] += hours
 	}
 	return projectTotals, projectPaths
-}
-
-func DisplayFlatTotals(projectTotals map[string]float64, projectPaths map[string]map[string]float64) {
-	var grandTotal float64
-	for project, total := range projectTotals {
-		fmt.Printf("%15.2fh  %s\n", total, project)
-		grandTotal += total
-		paths := projectPaths[project]
-		for path, hours := range paths {
-			if path == project {
-				continue
-			}
-			indent := "  "
-			rest := strings.TrimPrefix(path, project+":")
-			fmt.Printf("%15s%5.1fh    %s\n", indent, hours, rest)
-		}
-	}
-	fmt.Println("--------------------")
-	fmt.Printf("%15.2fh\n", grandTotal)
 }
 
 // Parse entries into structured data
@@ -699,79 +611,6 @@ func sumMap(m map[string]float64) float64 {
 		total += v
 	}
 	return total
-}
-
-type Node struct {
-	Name     string
-	Total    float64
-	Children map[string]*Node
-}
-
-func addToTree(root *Node, segments []string, hours float64) {
-	node := root
-	for _, seg := range segments {
-		if node.Children == nil {
-			node.Children = make(map[string]*Node)
-		}
-		if node.Children[seg] == nil {
-			node.Children[seg] = &Node{Name: seg}
-		}
-		node = node.Children[seg]
-		node.Total += hours
-	}
-}
-
-func buildTree(entries []string) *Node {
-	root := &Node{Name: ""}
-	for _, entry := range entries {
-		parts := strings.Fields(entry)
-		if len(parts) < 2 {
-			continue
-		}
-		segments := strings.Split(parts[1], ":")
-		duration, err := time.ParseDuration(parts[0] + "h")
-		if err != nil {
-			continue
-		}
-		addToTree(root, segments, duration.Hours())
-	}
-	return root
-}
-
-func printCollapsed(node *Node, prefix string, indent int) {
-	if len(node.Children) == 1 {
-		for _, child := range node.Children {
-			newPrefix := node.Name
-			if prefix != "" {
-				newPrefix = prefix + ":" + child.Name
-			} else {
-				newPrefix = child.Name
-			}
-			printCollapsed(child, newPrefix, indent)
-			return
-		}
-	}
-	if node.Name != "" || prefix != "" {
-		name := prefix
-		if name == "" {
-			name = node.Name
-		}
-		fmt.Printf("%15.2fh  %s\n", node.Total, name)
-	}
-	for _, child := range node.Children {
-		printCollapsed(child, "", indent+2)
-	}
-}
-
-func DisplayCollapsedTotals(entries []string) {
-	root := buildTree(entries)
-	var total float64
-	for _, child := range root.Children {
-		printCollapsed(child, child.Name, 0)
-		total += child.Total
-	}
-	fmt.Println("--------------------")
-	fmt.Printf("%15.2fh\n", total)
 }
 
 func CatInEntries(days int) error {
