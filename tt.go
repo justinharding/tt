@@ -96,6 +96,20 @@ func main() {
 	// Dispatch regular actions
 	switch action {
 	case "in", "sw", "switch":
+		lastType, err := lastEntryType()
+		if err != nil {
+			fmt.Println("Error reading last entry:", err)
+			os.Exit(1)
+		}
+		if action == "in" && lastType != "o" {
+			fmt.Println("Cannot clock in: last entry is not an 'o' (out) entry.")
+			os.Exit(1)
+		}
+		if (action == "sw" || action == "switch") && lastType != "i" {
+			fmt.Println("Cannot switch: last entry is not an 'i' (in) entry.")
+			os.Exit(1)
+		}
+
 		var project string
 		if len(args) > 0 {
 			project = strings.Join(args, " ")
@@ -130,6 +144,16 @@ func main() {
 			}
 		}
 	case "out":
+		lastType, err := lastEntryType()
+		if err != nil {
+			fmt.Println("Error reading last entry:", err)
+			os.Exit(1)
+		}
+		if lastType != "i" {
+			fmt.Println("Cannot out: last entry is not an 'i' (in) entry.")
+			os.Exit(1)
+		}
+
 		project := strings.Join(args, " ")
 		if err := clockOut(project); err != nil {
 			fmt.Println("Error:", err)
@@ -458,7 +482,7 @@ func hoursForRange(startDate, endDate string, group bool) (float64, map[string]f
 			continue
 		}
 		if strings.HasPrefix(line, "i ") {
-			t, err := time.Parse("2006-01-02 15:04:05", datetime)
+			t, err := time.ParseInLocation("2006-01-02 15:04:05", datetime, time.Local)
 			if err == nil {
 				inTimes = append(inTimes, t)
 				project := strings.Join(parts[3:], " ")
@@ -466,16 +490,25 @@ func hoursForRange(startDate, endDate string, group bool) (float64, map[string]f
 			}
 		}
 		if strings.HasPrefix(line, "o ") {
-			t, err := time.Parse("2006-01-02 15:04:05", datetime)
+			t, err := time.ParseInLocation("2006-01-02 15:04:05", datetime, time.Local)
 			if err == nil {
 				outTimes = append(outTimes, t)
 			}
 		}
 	}
 
+	// Only append time.Now() if there is one more in than out
+	lastType, _ := lastEntryType()
+	today := time.Now().Format("2006-01-02")
+	if lastType == "i" && today >= startDate && today <= endDate && len(inTimes) == len(outTimes)+1 {
+		outTimes = append(outTimes, time.Now())
+	}
+
 	var entries []string
 	var total float64
-	for i := 0; i < len(inTimes) && i < len(outTimes); i++ {
+	// Only pair up to the minimum of inTimes and outTimes
+	n := min(len(outTimes), len(inTimes))
+	for i := range n {
 		dur := outTimes[i].Sub(inTimes[i])
 		if dur > 0 {
 			total += dur.Hours()
@@ -655,4 +688,23 @@ func CatInEntries(days int) error {
 		}
 	}
 	return nil
+}
+
+func lastEntryType() (string, error) {
+	f, err := os.Open(getTimelogFile())
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	var lastType string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "i ") {
+			lastType = "i"
+		} else if strings.HasPrefix(line, "o ") {
+			lastType = "o"
+		}
+	}
+	return lastType, nil
 }

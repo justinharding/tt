@@ -805,18 +805,5 @@ o 2025-09-15 14:41:07
 i 2025-09-15 17:45:29 fish:donkey:string:eat:vm
 o 2025-09-15 19:13:22 
 i 2025-09-16 07:12:16 fish:donkey:string:eat:vm
-o 2025-09-16 14:30:11
-i 2025-09-16 14:30:11 fish:donkey:string:hum_hum:requirements:meeting
-o 2025-09-16 15:35:16 
-i 2025-09-16 17:48:53 fish:admin:donkey:string:eat:meeting  asn
 o 2025-09-16 18:43:56 
 i 2025-09-17 08:27:48 fish:donkey:string:eat:vm
-o 2025-09-17 10:00:00
-i 2025-09-17 10:00:00 fish:thinking:ska:meeting
-o 2025-09-17 11:00:00
-i 2025-09-17 11:00:00 fish:donkey:string:eat:vm
-o 2025-09-17 15:03:58
-i 2025-09-17 15:03:58 fish:donkey:meeting:cmi_catchup
-o 2025-09-17 16:33:03 
-i 2025-09-17 16:33:03 fish:donkey:string:eat:vm
-o 2025-09-17 16:49:07 
