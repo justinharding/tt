@@ -206,22 +206,40 @@ func main() {
 		} else {
 			fmt.Printf("Hours worked this week: %.2f\n", hours)
 		}
+	case "validate":
+		if err := validateTimelogFile(getTimelogFile()); err != nil {
+			fmt.Println("Validation error:", err)
+			os.Exit(1)
+		}
+		return
 	default:
 		usage()
 	}
 }
 
 func usage() {
-	fmt.Println(`Usage: timelog <action> [project]
+	fmt.Println(`Usage: timelog <action> [project] [options] [filename]
 Actions:
-  in <project>      - clock into project
-  out <project>     - clock out of project
-  sw <project>      - switch projects
+  in <project>      - clock into project (only if last entry is 'o')
+  out <project>     - clock out of project (only if last entry is 'i')
+  sw <project>      - switch projects (only if last entry is 'i')
   cur               - show currently open project
   last              - show last closed project
-  last N            - show Nth last closed project
-  last^ - ^^^       - show Nth last closed project`,
-	)
+  hours/td          - show hours worked today
+  hoursago/yd       - show hours worked N days ago
+  thisweek          - show hours worked this week
+  yd                - show hours for yesterday
+  lw                - show hours for last week
+  validate          - validate timelog file for out-of-order entries
+Options:
+  -group            - group output by project
+  -file <filename>  - specify timelog file
+  [filename]        - specify timelog file as last argument
+
+	last, yd, lw, cat can all take a param N to indicate how many days back, e.g. "yd 3" for 3 days ago.
+	they can also be suffixed with ^ characters, e.g. "yd^^" for 2 days ago.`)
+
+	fmt.Println("If no -file option is given, the TIMELOG environment variable is used if set, otherwise 'timelog.txt' in the current directory.")
 }
 
 func getTimelogFile() string {
@@ -707,4 +725,38 @@ func lastEntryType() (string, error) {
 		}
 	}
 	return lastType, nil
+}
+
+func validateTimelogFile(filename string) error {
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var lastTime time.Time
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+		if strings.HasPrefix(line, "i ") || strings.HasPrefix(line, "o ") {
+			parts := strings.Fields(line)
+			if len(parts) < 3 {
+				fmt.Printf("Warning: line %d malformed: %s\n", lineNum, line)
+				continue
+			}
+			datetime := parts[1] + " " + parts[2]
+			t, err := time.ParseInLocation("2006-01-02 15:04:05", datetime, time.Local)
+			if err != nil {
+				fmt.Printf("Warning: line %d invalid time: %s\n", lineNum, line)
+				continue
+			}
+			if !lastTime.IsZero() && t.Before(lastTime) {
+				fmt.Printf("Warning: line %d time %s before previous entry (%s)\n", lineNum, t.Format("2006-01-02 15:04:05"), lastTime.Format("2006-01-02 15:04:05"))
+			}
+			lastTime = t
+		}
+	}
+	return nil
 }
