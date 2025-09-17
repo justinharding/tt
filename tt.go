@@ -1,0 +1,867 @@
+package main
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+	"strings"
+	"time"
+)
+
+const (
+	dateTimeLayout = "2006-01-02 15:04:05"
+	endOfDatePos   = 21
+)
+
+type GroupNode struct {
+	Name     string
+	Total    float64
+	Children map[string]*GroupNode
+}
+
+// Entry represents a parsed log entry
+type Entry struct {
+	Project  string
+	Segments []string
+	Hours    float64
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		usage()
+		return
+	}
+	action := os.Args[1]
+	args := os.Args[2:]
+
+	group := false
+	if len(args) > 0 && args[len(args)-1] == "group" {
+		group = true
+		args = args[:len(args)-1]
+	}
+	if strings.HasPrefix(action, "last") && strings.TrimLeft(action[len("last"):], "^") == "" {
+		count := 1 + strings.Count(action[len("last"):], "^")
+		if len(args) > 0 {
+			fmt.Sscanf(args[0], "%d", &count)
+		}
+		if proj, err := lastProjectN(count); err == nil {
+			fmt.Println("Last closed project:", proj)
+		} else {
+			fmt.Println("Error:", err)
+		}
+		return
+	}
+	if strings.HasPrefix(action, "yd") && strings.TrimLeft(action[len("yd"):], "^") == "" {
+		count := 1 + strings.Count(action[len("yd"):], "^")
+		hours, _, _, entries, err := hoursForDay(count, group)
+		if err != nil {
+			fmt.Println("Error:", err)
+		} else if group {
+			// DisplayFlatTotals(projectNames, projectPaths)
+			DisplayHierTotals(entries)
+			// fmt.Printf("Total hours: %.2f\n", hours)
+			// fmt.Println("Group breakdown:")
+			// for k, v := range groups {
+			// 	fmt.Printf("  %s: %.2f\n", k, v)
+			// }
+		} else {
+			fmt.Printf("Hours worked %d days ago: %.2f\n", count, hours)
+		}
+
+		// hours, err := hoursForDay(count)
+		// if err != nil {
+		// 	fmt.Println("Error:", err)
+		// } else {
+		// 	fmt.Printf("Hours worked %d days ago: %.2f\n", count, hours)
+		// }
+		return
+	}
+
+	if strings.HasPrefix(action, "lw") && strings.TrimLeft(action[len("lw"):], "^") == "" {
+		count := strings.Count(action[len("lw"):], "^")
+		if len(args) > 0 {
+			fmt.Sscanf(args[0], "%d", &count)
+		}
+		hours, err := hoursForWeek(count)
+		if err != nil {
+			fmt.Println("Error:", err)
+		} else {
+			if count == 0 {
+				fmt.Printf("Hours worked this week: %.2f\n", hours)
+			} else if count == 1 {
+				fmt.Printf("Hours worked last week: %.2f\n", hours)
+			} else {
+				fmt.Printf("Hours worked %d weeks ago: %.2f\n", count, hours)
+			}
+		}
+		return
+	}
+
+	if strings.HasPrefix(action, "cat") && strings.TrimLeft(action[len("cat"):], "^") == "" {
+		count := 1 + strings.Count(action[len("cat"):], "^")
+		if len(args) > 0 {
+			fmt.Sscanf(args[0], "%d", &count)
+		}
+		err := CatInEntries(count)
+		if err != nil {
+			fmt.Println("Error:", err)
+		}
+		return
+	}
+
+	switch action {
+	case "in":
+		var project string
+		if len(args) > 0 {
+			project = strings.Join(args, " ")
+		} else {
+			projects, err := lastNProjects(10)
+			if err != nil || len(projects) == 0 {
+				fmt.Println("No previous projects found.")
+				os.Exit(1)
+			}
+			fmt.Println("Select a project:")
+			for i, p := range projects {
+				fmt.Printf("%d: %s\n", i+1, p)
+			}
+			fmt.Print("Enter number: ")
+			var choice int
+			_, err = fmt.Scanf("%d", &choice)
+			if err != nil || choice < 1 || choice > len(projects) {
+				fmt.Println("Invalid selection.")
+				os.Exit(1)
+			}
+			project = projects[choice-1]
+		}
+		if err := clockIn(project); err != nil {
+			fmt.Println("Error:", err)
+			os.Exit(1)
+		}
+	case "out":
+		project := strings.Join(args, " ")
+		if err := clockOut(project); err != nil {
+			fmt.Println("Error:", err)
+			os.Exit(1)
+		}
+	case "sw", "switch":
+		var project string
+		if len(args) > 0 {
+			project = strings.Join(args, " ")
+		} else {
+			projects, err := lastNProjects(10)
+			if err != nil || len(projects) == 0 {
+				fmt.Println("No previous projects found.")
+				os.Exit(1)
+			}
+			fmt.Println("Select a project:")
+			for i, p := range projects {
+				fmt.Printf("%d: %s\n", i+1, p)
+			}
+			fmt.Print("Enter number: ")
+			var choice int
+			_, err = fmt.Scanf("%d", &choice)
+			if err != nil || choice < 1 || choice > len(projects) {
+				fmt.Println("Invalid selection.")
+				os.Exit(1)
+			}
+			project = projects[choice-1]
+		}
+		if err := switchProject(project); err != nil {
+			fmt.Println("Error:", err)
+			os.Exit(1)
+		}
+	case "cur", "st":
+		if proj, err := currentProject(); err == nil {
+			fmt.Println("Current project:", proj)
+		} else {
+			fmt.Println("Error:", err)
+		}
+	case "last":
+		count := 1
+		if len(args) > 0 {
+			fmt.Sscanf(args[0], "%d", &count)
+		}
+		if proj, err := lastProjectN(count); err == nil {
+			fmt.Println("Last closed project:", proj)
+		} else {
+			fmt.Println("Error:", err)
+		}
+	case "hours", "td":
+		hours, _, _, entries, err := hoursToday(group)
+		if err != nil {
+			fmt.Println("Error:", err)
+		} else if group {
+			DisplayHierTotals(entries)
+		} else {
+			fmt.Printf("Hours worked today: %.2f\n", hours)
+		}
+
+	case "hoursago", "yd":
+		var days int
+		if len(args) > 0 {
+			fmt.Sscanf(args[0], "%d", &days)
+		}
+
+		hours, _, _, entries, err := hoursForDay(days, group)
+		if err != nil {
+			fmt.Println("Error:", err)
+		} else if group {
+			DisplayHierTotals(entries)
+		} else {
+			fmt.Printf("Hours worked %d days ago: %.2f\n", days, hours)
+		}
+
+	case "thisweek", "tw":
+		hours, err := hoursThisWeek()
+		if err != nil {
+			fmt.Println("Error:", err)
+		} else {
+			fmt.Printf("Hours worked this week: %.2f\n", hours)
+		}
+	default:
+		usage()
+	}
+}
+
+func usage() {
+	fmt.Println(`Usage: timelog <action> [project]
+Actions:
+  in <project>      - clock into project
+  out <project>     - clock out of project
+  sw <project>      - switch projects
+  cur               - show currently open project
+  last              - show last closed project
+  last N            - show Nth last closed project
+  last^ - ^^^       - show Nth last closed project`,
+	)
+}
+
+func getTimelogFile() string {
+	if f := os.Getenv("TIMELOG"); f != "" {
+		return f
+	}
+	return "timelog.txt"
+}
+
+func clockIn(project string) error {
+	if alreadyCheckedIn() {
+		return errors.New("already checked in")
+	}
+	entry := fmt.Sprintf("i %s %s\n", time.Now().Format(dateTimeLayout), project)
+	return appendToFile(entry)
+}
+
+func clockOut(project string) error {
+	if alreadyCheckedOut() {
+		return errors.New("already checked out")
+	}
+	entry := fmt.Sprintf("o %s %s\n", time.Now().Format(dateTimeLayout), project)
+	return appendToFile(entry)
+}
+
+func switchProject(project string) error {
+	if alreadyCheckedOut() {
+		return errors.New("not checked in")
+	}
+	if current, _ := currentProject(); current == project {
+		return errors.New("already checked in to this project")
+	}
+	if err := clockOut(""); err != nil {
+		return err
+	}
+	return clockIn(project)
+}
+
+func appendToFile(entry string) error {
+	f, err := os.OpenFile(getTimelogFile(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(entry)
+	return err
+}
+
+func alreadyCheckedIn() bool {
+	last, _ := lastEntry()
+	return strings.HasPrefix(last, "i")
+}
+
+func alreadyCheckedOut() bool {
+	last, _ := lastEntry()
+	return strings.HasPrefix(last, "o")
+}
+
+func lastEntry() (string, error) {
+	f, err := os.Open(getTimelogFile())
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	var last string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		last = scanner.Text()
+	}
+	return last, scanner.Err()
+}
+
+func currentProject() (string, error) {
+	f, err := os.Open(getTimelogFile())
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	var lastIn string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "i ") {
+			lastIn = strings.TrimSpace(line[endOfDatePos:])
+		}
+	}
+	if lastIn == "" {
+		return "", errors.New("no current project")
+	}
+	return lastIn, nil
+}
+
+func lastProjectN(count int) (string, error) {
+	f, err := os.Open(getTimelogFile())
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+
+	// Find all "o" entry indices (closed projects)
+	var outIndices []int
+	for i, line := range lines {
+		if strings.HasPrefix(line, "o ") {
+			outIndices = append(outIndices, i)
+		}
+	}
+
+	if len(outIndices) < count || count < 1 {
+		return "", errors.New("not enough closed projects")
+	}
+
+	// Get the nth last "o" entry
+	outIdx := outIndices[len(outIndices)-count]
+
+	// Find the most recent "i" entry before this "o"
+	var lastIn string
+	for i := outIdx - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], "i ") {
+			lastIn = strings.TrimSpace(lines[i][endOfDatePos:])
+			break
+		}
+	}
+
+	if lastIn == "" {
+		return "", errors.New("no closed project found for given count")
+	}
+	return lastIn, nil
+}
+
+func actionHasPrefixWithCarets(prefix, action string) bool {
+	return strings.HasPrefix(action, prefix) && strings.TrimLeft(action[len(prefix):], "^") == ""
+}
+
+func lastNProjects(n int) ([]string, error) {
+	f, err := os.Open(getTimelogFile())
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var allProjects []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "i ") {
+			proj := strings.TrimSpace(line[endOfDatePos:])
+			if proj != "" {
+				allProjects = append(allProjects, proj)
+			}
+		}
+	}
+	// Reverse for most recent first
+	for i, j := 0, len(allProjects)-1; i < j; i, j = i+1, j-1 {
+		allProjects[i], allProjects[j] = allProjects[j], allProjects[i]
+	}
+	// Deduplicate, preserving order
+	unique := []string{}
+	seen := make(map[string]bool)
+	for _, proj := range allProjects {
+		if !seen[proj] {
+			unique = append(unique, proj)
+			seen[proj] = true
+			if len(unique) == n {
+				break
+			}
+		}
+	}
+	return unique, nil
+}
+
+// Returns hours worked for today
+func hoursToday(group bool) (float64, map[string]float64, map[string]map[string]float64, []string, error) {
+	return hoursForDay(0, group)
+}
+
+// Returns hours worked for N days ago (0 = today, 1 = yesterday, etc)
+func hoursForDay(daysAgo int, group bool) (float64, map[string]float64, map[string]map[string]float64, []string, error) {
+	f, err := os.Open(getTimelogFile())
+	if err != nil {
+		return 0, nil, nil, nil, err
+	}
+	defer f.Close()
+
+	targetDate := time.Now().AddDate(0, 0, -daysAgo).Format("2006-01-02")
+
+	var inTimes, outTimes []time.Time
+	var inProjects []string
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+		date := parts[1]
+		datetime := parts[1] + " " + parts[2]
+		if strings.HasPrefix(line, "i ") && strings.HasPrefix(date, targetDate) {
+			t, err := time.Parse("2006-01-02 15:04:05", datetime)
+			if err == nil {
+				inTimes = append(inTimes, t)
+				// Project name is everything after the timestamp
+				project := strings.Join(parts[3:], " ")
+				inProjects = append(inProjects, project)
+			}
+		}
+		if strings.HasPrefix(line, "o ") && strings.HasPrefix(date, targetDate) {
+			t, err := time.Parse("2006-01-02 15:04:05", datetime)
+			if err == nil {
+				outTimes = append(outTimes, t)
+			}
+		}
+	}
+
+	// Pair up ins and outs
+	var entries []string
+	var total float64
+	for i := 0; i < len(inTimes) && i < len(outTimes); i++ {
+		dur := outTimes[i].Sub(inTimes[i])
+		if dur > 0 {
+			total += dur.Hours()
+			entries = append(entries, fmt.Sprintf("%f %s", dur.Hours(), inProjects[i]))
+		}
+	}
+
+	// fmt.Printf("jh entries %v\n", entries)
+	if group {
+		// return total, groupTotals(entries), nil
+		projectTotals, projectPaths := groupFlatTotals(entries)
+		return total, projectTotals, projectPaths, entries, nil
+	}
+	return total, nil, nil, nil, nil
+}
+
+func hoursThisWeek() (float64, error) {
+	f, err := os.Open(getTimelogFile())
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	now := time.Now()
+	// Find Monday of this week
+	offset := int(now.Weekday())
+	if offset == 0 { // Sunday
+		offset = 6
+	} else {
+		offset = offset - 1
+	}
+	monday := now.AddDate(0, 0, -offset)
+	mondayDate := monday.Format("2006-01-02")
+
+	var inTimes, outTimes []time.Time
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+		date := parts[1]
+		datetime := parts[1] + " " + parts[2]
+		if date < mondayDate {
+			continue
+		}
+		if strings.HasPrefix(line, "i ") {
+			t, err := time.Parse("2006-01-02 15:04:05", datetime)
+			if err == nil {
+				inTimes = append(inTimes, t)
+			}
+		}
+		if strings.HasPrefix(line, "o ") {
+			t, err := time.Parse("2006-01-02 15:04:05", datetime)
+			if err == nil {
+				outTimes = append(outTimes, t)
+			}
+		}
+	}
+
+	var total float64
+	for i := 0; i < len(inTimes) && i < len(outTimes); i++ {
+		dur := outTimes[i].Sub(inTimes[i]).Hours()
+		if dur > 0 {
+			total += dur
+		}
+	}
+	return total, nil
+}
+
+func hoursForWeek(weeksAgo int) (float64, error) {
+	f, err := os.Open(getTimelogFile())
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	now := time.Now()
+	// Find Monday of this week
+	offset := int(now.Weekday())
+	if offset == 0 { // Sunday
+		offset = 6
+	} else {
+		offset = offset - 1
+	}
+	monday := now.AddDate(0, 0, -offset-7*weeksAgo)
+	sunday := monday.AddDate(0, 0, 6)
+	mondayDate := monday.Format("2006-01-02")
+	sundayDate := sunday.Format("2006-01-02")
+
+	var inTimes, outTimes []time.Time
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+		date := parts[1]
+		datetime := parts[1] + " " + parts[2]
+		if date < mondayDate || date > sundayDate {
+			continue
+		}
+		if strings.HasPrefix(line, "i ") {
+			t, err := time.Parse("2006-01-02 15:04:05", datetime)
+			if err == nil {
+				inTimes = append(inTimes, t)
+			}
+		}
+		if strings.HasPrefix(line, "o ") {
+			t, err := time.Parse("2006-01-02 15:04:05", datetime)
+			if err == nil {
+				outTimes = append(outTimes, t)
+			}
+		}
+	}
+
+	var total float64
+	for i := 0; i < len(inTimes) && i < len(outTimes); i++ {
+		dur := outTimes[i].Sub(inTimes[i]).Hours()
+		if dur > 0 {
+			total += dur
+		}
+	}
+	return total, nil
+}
+
+func addEntry(root *GroupNode, segments []string, hours float64) {
+	node := root
+	for _, seg := range segments {
+		if node.Children == nil {
+			node.Children = make(map[string]*GroupNode)
+		}
+		if _, ok := node.Children[seg]; !ok {
+			node.Children[seg] = &GroupNode{Name: seg}
+		}
+		node = node.Children[seg]
+		node.Total += hours
+	}
+}
+
+func groupTotals(entries []string) *GroupNode {
+	root := &GroupNode{Name: "root"}
+	for _, entry := range entries {
+		parts := strings.Fields(entry)
+		if len(parts) < 2 {
+			continue
+		}
+		project := parts[1]
+		segments := strings.Split(project, ":")
+		duration, err := time.ParseDuration(parts[0] + "h")
+		if err != nil {
+			continue
+		}
+		addEntry(root, segments, duration.Hours())
+	}
+	return root
+}
+
+func printGroup(node *GroupNode, indent int) {
+	if node.Name != "root" {
+		fmt.Printf("%*s%6.2fh  %s\n", indent, "", node.Total, node.Name)
+	}
+	for _, child := range node.Children {
+		printGroup(child, indent+2)
+	}
+}
+
+func DisplayTotals(root *GroupNode) {
+	var total float64
+	for _, child := range root.Children {
+		total += child.Total
+		printGroup(child, 0)
+	}
+	fmt.Println("--------------------")
+	fmt.Printf("%6.2fh\n", total)
+}
+
+func groupFlatTotals(entries []string) (map[string]float64, map[string]map[string]float64) {
+	projectTotals := make(map[string]float64)
+	projectPaths := make(map[string]map[string]float64)
+	for _, entry := range entries {
+		parts := strings.Fields(entry)
+		if len(parts) < 2 {
+			continue
+		}
+		project := strings.Split(parts[1], ":")[0]
+		path := parts[1]
+		duration, err := time.ParseDuration(parts[0] + "h")
+		if err != nil {
+			continue
+		}
+		hours := duration.Hours()
+		projectTotals[project] += hours
+		if projectPaths[project] == nil {
+			projectPaths[project] = make(map[string]float64)
+		}
+		projectPaths[project][path] += hours
+	}
+	return projectTotals, projectPaths
+}
+
+func DisplayFlatTotals(projectTotals map[string]float64, projectPaths map[string]map[string]float64) {
+	var grandTotal float64
+	for project, total := range projectTotals {
+		fmt.Printf("%15.2fh  %s\n", total, project)
+		grandTotal += total
+		paths := projectPaths[project]
+		for path, hours := range paths {
+			if path == project {
+				continue
+			}
+			indent := "  "
+			rest := strings.TrimPrefix(path, project+":")
+			fmt.Printf("%15s%5.1fh    %s\n", indent, hours, rest)
+		}
+	}
+	fmt.Println("--------------------")
+	fmt.Printf("%15.2fh\n", grandTotal)
+}
+
+// Parse entries into structured data
+func parseEntries(entries []string) []Entry {
+	var result []Entry
+	for _, entry := range entries {
+		parts := strings.Fields(entry)
+		if len(parts) < 2 {
+			continue
+		}
+		segments := strings.Split(parts[1], ":")
+		duration, err := time.ParseDuration(parts[0] + "h")
+		if err != nil {
+			continue
+		}
+		result = append(result, Entry{
+			Project:  segments[0],
+			Segments: segments,
+			Hours:    duration.Hours(),
+		})
+	}
+	return result
+}
+
+// Group and display hierarchically
+func DisplayHierTotals(entries []string) {
+	parsed := parseEntries(entries)
+	projectTotals := make(map[string]float64)
+	subTotals := make(map[string]map[string]float64)
+	subSubTotals := make(map[string]map[string]float64)
+
+	for _, e := range parsed {
+		projectTotals[e.Project] += e.Hours
+		if len(e.Segments) > 1 {
+			sub := e.Segments[1]
+			if subTotals[e.Project] == nil {
+				subTotals[e.Project] = make(map[string]float64)
+			}
+			subTotals[e.Project][sub] += e.Hours
+			if len(e.Segments) > 2 {
+				path := strings.Join(e.Segments[2:], ":")
+				if subSubTotals[sub] == nil {
+					subSubTotals[sub] = make(map[string]float64)
+				}
+				subSubTotals[sub][path] += e.Hours
+			}
+		}
+	}
+
+	for project, total := range projectTotals {
+		fmt.Printf("%15.2fh  %s\n", total, project)
+		for sub, subTotal := range subTotals[project] {
+			fmt.Printf("%15.2fh    %s\n", subTotal, sub)
+			for path, pathTotal := range subSubTotals[sub] {
+				fmt.Printf("%15.2fh      %s\n", pathTotal, path)
+			}
+		}
+	}
+	fmt.Println("--------------------")
+	fmt.Printf("%15.2fh\n", sumMap(projectTotals))
+}
+
+func sumMap(m map[string]float64) float64 {
+	var total float64
+	for _, v := range m {
+		total += v
+	}
+	return total
+}
+
+type Node struct {
+	Name     string
+	Total    float64
+	Children map[string]*Node
+}
+
+func addToTree(root *Node, segments []string, hours float64) {
+	node := root
+	for _, seg := range segments {
+		if node.Children == nil {
+			node.Children = make(map[string]*Node)
+		}
+		if node.Children[seg] == nil {
+			node.Children[seg] = &Node{Name: seg}
+		}
+		node = node.Children[seg]
+		node.Total += hours
+	}
+}
+
+func buildTree(entries []string) *Node {
+	root := &Node{Name: ""}
+	for _, entry := range entries {
+		parts := strings.Fields(entry)
+		if len(parts) < 2 {
+			continue
+		}
+		segments := strings.Split(parts[1], ":")
+		duration, err := time.ParseDuration(parts[0] + "h")
+		if err != nil {
+			continue
+		}
+		addToTree(root, segments, duration.Hours())
+	}
+	return root
+}
+
+func printCollapsed(node *Node, prefix string, indent int) {
+	if len(node.Children) == 1 {
+		for _, child := range node.Children {
+			newPrefix := node.Name
+			if prefix != "" {
+				newPrefix = prefix + ":" + child.Name
+			} else {
+				newPrefix = child.Name
+			}
+			printCollapsed(child, newPrefix, indent)
+			return
+		}
+	}
+	if node.Name != "" || prefix != "" {
+		name := prefix
+		if name == "" {
+			name = node.Name
+		}
+		fmt.Printf("%15.2fh  %s\n", node.Total, name)
+	}
+	for _, child := range node.Children {
+		printCollapsed(child, "", indent+2)
+	}
+}
+
+func DisplayCollapsedTotals(entries []string) {
+	root := buildTree(entries)
+	var total float64
+	for _, child := range root.Children {
+		printCollapsed(child, child.Name, 0)
+		total += child.Total
+	}
+	fmt.Println("--------------------")
+	fmt.Printf("%15.2fh\n", total)
+}
+
+func CatInEntries(days int) error {
+	file, err := os.Open(getTimelogFile())
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var entries []string
+	daySet := make(map[string]struct{})
+	var daysList []string
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		if len(parts) < 3 || parts[0] != "i" {
+			continue
+		}
+		date := parts[1][:10]
+		entries = append(entries, line)
+		if _, exists := daySet[date]; !exists {
+			daysList = append(daysList, date)
+			daySet[date] = struct{}{}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	if days > len(daysList) {
+		days = len(daysList)
+	}
+	lastDays := daysList[len(daysList)-days:]
+
+	for _, entry := range entries {
+		parts := strings.Fields(entry)
+		date := parts[1][:10]
+		if slices.Contains(lastDays, date) {
+			fmt.Println(entry)
+		}
+	}
+	return nil
+}
