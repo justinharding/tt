@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	dateTimeLayout = "2006-01-02 15:04:05"
+	dateTimeFormat = "2006-01-02 15:04:05"
+	dateFormat     = "2006-01-02"
 	endOfDatePos   = 21
 )
 
@@ -314,7 +315,7 @@ func clockIn(project string) error {
 	if alreadyCheckedIn() {
 		return errors.New("already checked in")
 	}
-	entry := fmt.Sprintf("i %s %s\n", time.Now().Format(dateTimeLayout), project)
+	entry := fmt.Sprintf("i %s %s\n", time.Now().Format(dateTimeFormat), project)
 	return appendToFile(entry)
 }
 
@@ -322,7 +323,7 @@ func clockOut(project string) error {
 	if alreadyCheckedOut() {
 		return errors.New("already checked out")
 	}
-	entry := fmt.Sprintf("o %s %s\n", time.Now().Format(dateTimeLayout), project)
+	entry := fmt.Sprintf("o %s %s\n", time.Now().Format(dateTimeFormat), project)
 	return appendToFile(entry)
 }
 
@@ -500,7 +501,7 @@ func hoursForRange(startDate, endDate string, group bool) (float64, map[string]f
 			continue
 		}
 		if strings.HasPrefix(line, "i ") {
-			t, err := time.ParseInLocation("2006-01-02 15:04:05", datetime, time.Local)
+			t, err := time.ParseInLocation(dateTimeFormat, datetime, time.Local)
 			if err == nil {
 				inTimes = append(inTimes, t)
 				project := strings.Join(parts[3:], " ")
@@ -508,7 +509,7 @@ func hoursForRange(startDate, endDate string, group bool) (float64, map[string]f
 			}
 		}
 		if strings.HasPrefix(line, "o ") {
-			t, err := time.ParseInLocation("2006-01-02 15:04:05", datetime, time.Local)
+			t, err := time.ParseInLocation(dateTimeFormat, datetime, time.Local)
 			if err == nil {
 				outTimes = append(outTimes, t)
 			}
@@ -517,7 +518,7 @@ func hoursForRange(startDate, endDate string, group bool) (float64, map[string]f
 
 	// Only append time.Now() if there is one more in than out
 	lastType, _ := lastEntryType()
-	today := time.Now().Format("2006-01-02")
+	today := time.Now().Format(dateFormat)
 	if lastType == "i" && today >= startDate && today <= endDate && len(inTimes) == len(outTimes)+1 {
 		outTimes = append(outTimes, time.Now())
 	}
@@ -542,7 +543,7 @@ func hoursForRange(startDate, endDate string, group bool) (float64, map[string]f
 }
 
 func hoursForDay(daysAgo int, group bool) (float64, map[string]float64, map[string]map[string]float64, []string, error) {
-	targetDate := time.Now().AddDate(0, 0, -daysAgo).Format("2006-01-02")
+	targetDate := time.Now().AddDate(0, 0, -daysAgo).Format(dateFormat)
 	return hoursForRange(targetDate, targetDate, group)
 }
 
@@ -556,7 +557,7 @@ func hoursThisWeek(group bool) (float64, map[string]float64, map[string]map[stri
 	}
 	monday := now.AddDate(0, 0, -offset)
 	sunday := monday.AddDate(0, 0, 6)
-	return hoursForRange(monday.Format("2006-01-02"), sunday.Format("2006-01-02"), group)
+	return hoursForRange(monday.Format(dateFormat), sunday.Format(dateFormat), group)
 }
 
 func hoursForWeek(weeksAgo int, group bool) (float64, map[string]float64, map[string]map[string]float64, []string, error) {
@@ -569,7 +570,7 @@ func hoursForWeek(weeksAgo int, group bool) (float64, map[string]float64, map[st
 	}
 	monday := now.AddDate(0, 0, -offset-7*weeksAgo)
 	sunday := monday.AddDate(0, 0, 6)
-	return hoursForRange(monday.Format("2006-01-02"), sunday.Format("2006-01-02"), group)
+	return hoursForRange(monday.Format(dateFormat), sunday.Format(dateFormat), group)
 }
 
 func groupFlatTotals(entries []string) (map[string]float64, map[string]map[string]float64) {
@@ -747,13 +748,13 @@ func validateTimelogFile(filename string) error {
 				continue
 			}
 			datetime := parts[1] + " " + parts[2]
-			t, err := time.ParseInLocation("2006-01-02 15:04:05", datetime, time.Local)
+			t, err := time.ParseInLocation(dateTimeFormat, datetime, time.Local)
 			if err != nil {
 				fmt.Printf("Warning: line %d invalid time: %s\n", lineNum, line)
 				continue
 			}
 			if !lastTime.IsZero() && t.Before(lastTime) {
-				fmt.Printf("Warning: line %d time %s before previous entry (%s)\n", lineNum, t.Format("2006-01-02 15:04:05"), lastTime.Format("2006-01-02 15:04:05"))
+				fmt.Printf("Warning: line %d time %s before previous entry (%s)\n", lineNum, t.Format(dateTimeFormat), lastTime.Format(dateTimeFormat))
 			}
 			lastTime = t
 		}
