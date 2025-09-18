@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -62,8 +63,20 @@ func main() {
 		}
 	}
 
+	if f := os.Getenv("TIMELOG"); f != "" {
+		timeLogFile = f
+	}
+	commands := []string{"in", "out", "sw", "switch", "cur", "st", "last", "hours", "td", "hoursago", "yd", "thisweek", "tw", "validate", "timelog"}
 	// If file not set, check if last arg is a filename (not an action or flag)
-	if file == "" && len(args) > 0 && !strings.HasPrefix(args[len(args)-1], "-") {
+	if file == "" && len(args) > 0 &&
+		!strings.HasPrefix(args[len(args)-1], "-") &&
+		!isInteger(args[len(args)-1]) &&
+		!slices.Contains(commands, args[len(args)-1]) &&
+		!strings.HasPrefix(args[len(args)-1], "last") &&
+		!strings.HasPrefix(args[len(args)-1], "yd") &&
+		!strings.HasPrefix(args[len(args)-1], "lw") &&
+		!strings.HasPrefix(args[len(args)-1], "ins") &&
+		!strings.HasPrefix(args[len(args)-1], "cat") {
 		file = args[len(args)-1]
 		args = args[:len(args)-1]
 	}
@@ -83,8 +96,12 @@ func main() {
 	case strings.HasPrefix(action, "lw") && strings.TrimLeft(action[len("lw"):], "^") == "":
 		handleLw(action, args, group)
 		return
+	case strings.HasPrefix(action, "ins") && strings.TrimLeft(action[len("ins"):], "^") == "":
+		handleIns(action, args)
+		return
 	case strings.HasPrefix(action, "cat") && strings.TrimLeft(action[len("cat"):], "^") == "":
-		handleCat(action, args)
+		handleCat(action,
+			args)
 		return
 	}
 
@@ -201,6 +218,9 @@ func main() {
 		} else {
 			fmt.Printf("Hours worked this week: %.2f\n", hours)
 		}
+	case "timelog":
+		fmt.Println(getTimelogFile())
+		os.Exit(1)
 	case "validate":
 		if err := validateTimelogFile(getTimelogFile()); err != nil {
 			fmt.Println("Validation error:", err)
@@ -242,9 +262,6 @@ func getTimelogFile() string {
 		return timeLogFile
 	}
 
-	if f := os.Getenv("TIMELOG"); f != "" {
-		return f
-	}
 	return "timelog.txt"
 }
 
@@ -294,7 +311,7 @@ func handleLw(action string, args []string, group bool) {
 	}
 }
 
-func handleCat(action string, args []string) {
+func handleIns(action string, args []string) {
 	count := 1 + strings.Count(action[len("cat"):], "^")
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
@@ -303,6 +320,51 @@ func handleCat(action string, args []string) {
 	if err != nil {
 		fmt.Println("Error:", err)
 	}
+}
+
+func handleCat(action string, args []string) {
+	count := 1 + strings.Count(action[len("cat"):], "^")
+	if len(args) > 0 {
+		fmt.Sscanf(args[0], "%d", &count)
+	}
+	err := CatAllEntries(count)
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+}
+
+func validateTimelogFile(filename string) error {
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var lastTime time.Time
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+		if strings.HasPrefix(line, "i ") || strings.HasPrefix(line, "o ") {
+			parts := strings.Fields(line)
+			if len(parts) < 3 {
+				fmt.Printf("Warning: line %d malformed: %s\n", lineNum, line)
+				continue
+			}
+			datetime := parts[1] + " " + parts[2]
+			t, err := time.ParseInLocation(dateTimeFormat, datetime, time.Local)
+			if err != nil {
+				fmt.Printf("Warning: line %d invalid time: %s\n", lineNum, line)
+				continue
+			}
+			if !lastTime.IsZero() && t.Before(lastTime) {
+				fmt.Printf("Warning: line %d time %s before previous entry (%s)\n", lineNum, t.Format(dateTimeFormat), lastTime.Format(dateTimeFormat))
+			}
+			lastTime = t
+		}
+	}
+	return nil
 }
 
 func clockIn(project string) error {
@@ -703,6 +765,47 @@ func CatInEntries(days int) error {
 	return nil
 }
 
+func CatAllEntries(days int) error {
+	file, err := os.Open(getTimelogFile())
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var entries []string
+	daySet := make(map[string]struct{})
+	var daysList []string
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		date := parts[1][:10]
+		entries = append(entries, line)
+		if _, exists := daySet[date]; !exists {
+			daysList = append(daysList, date)
+			daySet[date] = struct{}{}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	if days > len(daysList) {
+		days = len(daysList)
+	}
+	lastDays := daysList[len(daysList)-days:]
+
+	for _, entry := range entries {
+		parts := strings.Fields(entry)
+		date := parts[1][:10]
+		if slices.Contains(lastDays, date) {
+			fmt.Println(entry)
+		}
+	}
+	return nil
+}
+
 func lastEntryType() (string, error) {
 	f, err := os.Open(getTimelogFile())
 	if err != nil {
@@ -722,36 +825,7 @@ func lastEntryType() (string, error) {
 	return lastType, nil
 }
 
-func validateTimelogFile(filename string) error {
-	f, err := os.Open(filename)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	var lastTime time.Time
-	scanner := bufio.NewScanner(f)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-		if strings.HasPrefix(line, "i ") || strings.HasPrefix(line, "o ") {
-			parts := strings.Fields(line)
-			if len(parts) < 3 {
-				fmt.Printf("Warning: line %d malformed: %s\n", lineNum, line)
-				continue
-			}
-			datetime := parts[1] + " " + parts[2]
-			t, err := time.ParseInLocation(dateTimeFormat, datetime, time.Local)
-			if err != nil {
-				fmt.Printf("Warning: line %d invalid time: %s\n", lineNum, line)
-				continue
-			}
-			if !lastTime.IsZero() && t.Before(lastTime) {
-				fmt.Printf("Warning: line %d time %s before previous entry (%s)\n", lineNum, t.Format(dateTimeFormat), lastTime.Format(dateTimeFormat))
-			}
-			lastTime = t
-		}
-	}
-	return nil
+func isInteger(s string) bool {
+	_, err := strconv.Atoi(s)
+	return err == nil
 }
