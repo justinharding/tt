@@ -36,6 +36,7 @@ func main() {
 		group  bool
 		file   string
 		action string
+		object string
 		args   []string
 	)
 
@@ -58,6 +59,9 @@ func main() {
 			if action == "" {
 				action = arg
 			} else {
+				if object == "" {
+					object = arg
+				}
 				args = append(args, arg)
 			}
 		}
@@ -72,11 +76,16 @@ func main() {
 		!strings.HasPrefix(args[len(args)-1], "-") &&
 		!isInteger(args[len(args)-1]) &&
 		!slices.Contains(commands, args[len(args)-1]) &&
+		args[len(args)-1] != object &&
 		!strings.HasPrefix(args[len(args)-1], "last") &&
 		!strings.HasPrefix(args[len(args)-1], "yd") &&
 		!strings.HasPrefix(args[len(args)-1], "lw") &&
 		!strings.HasPrefix(args[len(args)-1], "ins") &&
 		!strings.HasPrefix(args[len(args)-1], "cat") {
+		// fmt.Printf("jh stealing last arg: args %v\n", args)
+		// fmt.Printf("jh 2nd to last args %v\n", args[len(args)-1])
+		// fmt.Printf("jh checking %v\n", slices.Contains(commands, args[len(args)-1]))
+
 		file = args[len(args)-1]
 		args = args[:len(args)-1]
 	}
@@ -108,6 +117,7 @@ func main() {
 	// Dispatch regular actions
 	switch action {
 	case "in", "sw", "switch":
+		// fmt.Printf("jh args %v\n", args)
 		lastType, err := lastEntryType()
 		if err != nil {
 			fmt.Println("Error reading last entry:", err)
