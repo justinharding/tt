@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -70,7 +71,7 @@ func main() {
 	if f := os.Getenv("TIMELOG"); f != "" {
 		timeLogFile = f
 	}
-	commands := []string{"in", "out", "sw", "switch", "cur", "st", "last", "hours", "td", "hoursago", "yd", "thisweek", "tw", "validate", "timelog"}
+	commands := []string{"in", "out", "sw", "switch", "cur", "st", "last", "hours", "td", "hoursago", "yd", "thisweek", "tw", "validate", "edit", "timelog"}
 	// If file not set, check if last arg is a filename (not an action or flag)
 	if file == "" && len(args) > 0 &&
 		!strings.HasPrefix(args[len(args)-1], "-") &&
@@ -139,7 +140,6 @@ func main() {
 				excludeProject = project
 			}
 		}
-
 
 		var project string
 		if len(args) > 0 {
@@ -237,6 +237,9 @@ func main() {
 		} else {
 			fmt.Printf("Hours worked this week: %.2f\n", hours)
 		}
+	case "edit":
+		editTimelog()
+		os.Exit(1)
 	case "timelog":
 		fmt.Println(getTimelogFile())
 		os.Exit(1)
@@ -471,6 +474,18 @@ func currentProject() (string, error) {
 		return "", nil
 	}
 	return lastIn, nil
+}
+
+func editTimelog() error {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vi" // fallback if $EDITOR is not set
+	}
+	cmd := exec.Command(editor, getTimelogFile())
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func lastProjectN(count int) (string, error) {
