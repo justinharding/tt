@@ -131,12 +131,21 @@ func main() {
 			fmt.Println("Cannot switch: last entry is not an 'i' (in) entry.")
 			os.Exit(1)
 		}
+		excludeProject := ""
+		if action == "sw" || action == "switch" {
+			// get current project to project from list
+			project, err := currentProject()
+			if err == nil {
+				excludeProject = project
+			}
+		}
+
 
 		var project string
 		if len(args) > 0 {
 			project = strings.Join(args, " ")
 		} else {
-			projects, err := lastNProjects(10)
+			projects, err := lastNProjects(10, excludeProject)
 			if err != nil || len(projects) == 0 {
 				fmt.Println("No previous projects found.")
 				os.Exit(1)
@@ -507,7 +516,7 @@ func lastProjectN(count int) (string, error) {
 	return lastIn, nil
 }
 
-func lastNProjects(n int) ([]string, error) {
+func lastNProjects(n int, exclude string) ([]string, error) {
 	f, err := os.Open(getTimelogFile())
 	if err != nil {
 		return nil, err
@@ -528,10 +537,13 @@ func lastNProjects(n int) ([]string, error) {
 	for i, j := 0, len(allProjects)-1; i < j; i, j = i+1, j-1 {
 		allProjects[i], allProjects[j] = allProjects[j], allProjects[i]
 	}
-	// Deduplicate, preserving order
+	// Deduplicate, preserving order, and exclude if needed
 	unique := []string{}
 	seen := make(map[string]bool)
 	for _, proj := range allProjects {
+		if proj == exclude {
+			continue
+		}
 		if !seen[proj] {
 			unique = append(unique, proj)
 			seen[proj] = true
