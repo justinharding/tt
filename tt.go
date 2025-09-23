@@ -183,7 +183,7 @@ func main() {
 		}
 	case "cur", "st":
 		if proj, err := currentProject(); err == nil {
-			fmt.Println("Current project:", proj)
+			fmt.Println(proj)
 		} else {
 			fmt.Println("Error:", err)
 		}
@@ -447,15 +447,19 @@ func currentProject() (string, error) {
 	}
 	defer f.Close()
 	var lastIn string
+	var lastType string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "i ") {
 			lastIn = strings.TrimSpace(line[endOfDatePos:])
+			lastType = "i"
+		} else if strings.HasPrefix(line, "o ") {
+			lastType = "o"
 		}
 	}
-	if lastIn == "" {
-		return "", errors.New("no current project")
+	if lastType != "i" || lastIn == "" {
+		return "", nil
 	}
 	return lastIn, nil
 }
