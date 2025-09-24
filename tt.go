@@ -196,16 +196,6 @@ func main() {
 		} else {
 			fmt.Println("Error:", err)
 		}
-	case "last":
-		count := 1
-		if len(args) > 0 {
-			fmt.Sscanf(args[0], "%d", &count)
-		}
-		if proj, err := lastProjectN(count); err == nil {
-			fmt.Println("Last closed project:", proj)
-		} else {
-			fmt.Println("Error:", err)
-		}
 	case "hours", "td":
 		hours, _, _, entries, err := hoursToday(group)
 		if err != nil {
@@ -214,19 +204,6 @@ func main() {
 			DisplayHierTotals(entries)
 		} else {
 			fmt.Printf("Hours worked today: %.2f\n", hours)
-		}
-	case "hoursago", "yd":
-		var days int
-		if len(args) > 0 {
-			fmt.Sscanf(args[0], "%d", &days)
-		}
-		hours, _, _, entries, err := hoursForDay(days, group)
-		if err != nil {
-			fmt.Println("Error:", err)
-		} else if group {
-			DisplayHierTotals(entries)
-		} else {
-			fmt.Printf("Hours worked %d days ago: %.2f\n", days, hours)
 		}
 	case "thisweek", "tw":
 		hours, _, _, entries, err := hoursThisWeek(group)
@@ -291,6 +268,7 @@ func handleLast(action string, args []string) {
 	count := 1 + strings.Count(action[len("last"):], "^")
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
+		count = max(1, count)
 	}
 	if proj, err := lastProjectN(count); err == nil {
 		fmt.Println("Last closed project:", proj)
@@ -300,21 +278,31 @@ func handleLast(action string, args []string) {
 }
 
 func handleYd(action string, args []string, group bool) {
-	count := 1 + strings.Count(action[len("yd"):], "^")
+	count := strings.Count(action[len("yd"):], "^") + 1
+	if len(args) > 0 {
+		fmt.Sscanf(args[0], "%d", &count)
+		count = max(1, count)
+	}
 	hours, _, _, entries, err := hoursForDay(count, group)
 	if err != nil {
 		fmt.Println("Error:", err)
 	} else if group {
 		DisplayHierTotals(entries)
 	} else {
-		fmt.Printf("Hours worked %d days ago: %.2f\n", count, hours)
+		switch count {
+		case 1:
+			fmt.Printf("Hours worked 1 day ago: %.2f\n", hours)
+		default:
+			fmt.Printf("Hours worked %d days ago: %.2f\n", count, hours)
+		}
 	}
 }
 
 func handleLw(action string, args []string, group bool) {
-	count := strings.Count(action[len("lw"):], "^")
+	count := strings.Count(action[len("lw"):], "^") + 1
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
+		count = max(1, count)
 	}
 	hours, _, _, entries, err := hoursForWeek(count, group)
 	if err != nil {
@@ -323,8 +311,6 @@ func handleLw(action string, args []string, group bool) {
 		DisplayHierTotals(entries)
 	} else {
 		switch count {
-		case 0:
-			fmt.Printf("Hours worked this week: %.2f\n", hours)
 		case 1:
 			fmt.Printf("Hours worked last week: %.2f\n", hours)
 		default:
@@ -337,6 +323,7 @@ func handleIns(action string, args []string) {
 	count := 1 + strings.Count(action[len("cat"):], "^")
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
+		count = max(1, count)
 	}
 	err := CatInEntries(count)
 	if err != nil {
@@ -348,6 +335,7 @@ func handleCat(action string, args []string) {
 	count := 1 + strings.Count(action[len("cat"):], "^")
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
+		count = max(1, count)
 	}
 	err := CatAllEntries(count)
 	if err != nil {
