@@ -34,7 +34,7 @@ func main() {
 	}
 
 	var (
-		group  bool
+		group  = true
 		file   string
 		action string
 		object string
@@ -47,6 +47,8 @@ func main() {
 		switch arg {
 		case "-g", "-group":
 			group = true
+		case "-g-", "-group-":
+			group = false
 		case "-file":
 			if i+1 < len(os.Args) {
 				file = os.Args[i+1]
