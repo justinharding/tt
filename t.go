@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -234,7 +235,8 @@ func main() {
 }
 
 func usage() {
-	fmt.Println(`Usage: timelog <action> [project] [options] [filename]
+	prog := filepath.Base(os.Args[0])
+	fmt.Printf(`Usage: %s <action> [project] [options] [filename]
 Actions:
   in <project>      - clock into project (only if last entry is 'o')
   out <project>     - clock out of project (only if last entry is 'i')
@@ -253,7 +255,7 @@ Options:
   [filename]        - specify timelog file as last argument
 
 	last, yd, lw, cat can all take a param N to indicate how many days back, e.g. "yd 3" for 3 days ago.
-	they can also be suffixed with ^ characters, e.g. "yd^^" for 2 days ago.`)
+	they can also be suffixed with ^ characters, e.g. "yd^^" for 2 days ago.`, prog)
 
 	fmt.Println("If no -file option is given, the TIMELOG environment variable is used if set, otherwise 'timelog.txt' in the current directory.")
 }
