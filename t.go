@@ -113,8 +113,7 @@ func main() {
 		handleIns(action, args)
 		return
 	case strings.HasPrefix(action, "cat") && strings.TrimLeft(action[len("cat"):], "^") == "":
-		handleCat(action,
-			args)
+		handleCat(action, args)
 		return
 	}
 
@@ -269,7 +268,7 @@ func getTimelogFile() string {
 }
 
 func handleLast(action string, args []string) {
-	count := 1 + strings.Count(action[len("last"):], "^")
+	count := 1 + getTrailingCaratCount(action)
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
 		count = max(1, count)
@@ -282,7 +281,7 @@ func handleLast(action string, args []string) {
 }
 
 func handleYd(action string, args []string, group bool) {
-	count := strings.Count(action[len("yd"):], "^") + 1
+	count := 1 + getTrailingCaratCount(action)
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
 		count = max(1, count)
@@ -303,7 +302,7 @@ func handleYd(action string, args []string, group bool) {
 }
 
 func handleLw(action string, args []string, group bool) {
-	count := strings.Count(action[len("lw"):], "^") + 1
+	count := 1 + getTrailingCaratCount(action)
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
 		count = max(1, count)
@@ -324,7 +323,7 @@ func handleLw(action string, args []string, group bool) {
 }
 
 func handleIns(action string, args []string) {
-	count := 1 + strings.Count(action[len("cat"):], "^")
+	count := getTrailingCaratCount(action)
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
 		count = max(1, count)
@@ -336,7 +335,7 @@ func handleIns(action string, args []string) {
 }
 
 func handleCat(action string, args []string) {
-	count := 1 + strings.Count(action[len("cat"):], "^")
+	count := getTrailingCaratCount(action)
 	if len(args) > 0 {
 		fmt.Sscanf(args[0], "%d", &count)
 		count = max(1, count)
@@ -754,6 +753,7 @@ func sumMap(m map[string]float64) float64 {
 	return total
 }
 
+// paran days: number of days to include, if days is 0, include all
 func CatInEntries(days int) error {
 	file, err := os.Open(getTimelogFile())
 	if err != nil {
@@ -783,7 +783,7 @@ func CatInEntries(days int) error {
 		return err
 	}
 
-	if days > len(daysList) {
+	if days > len(daysList) || days == 0 {
 		days = len(daysList)
 	}
 	lastDays := daysList[len(daysList)-days:]
@@ -798,6 +798,7 @@ func CatInEntries(days int) error {
 	return nil
 }
 
+// paran days: number of days to include, if days is 0, include all
 func CatAllEntries(days int) error {
 	file, err := os.Open(getTimelogFile())
 	if err != nil {
@@ -824,7 +825,7 @@ func CatAllEntries(days int) error {
 		return err
 	}
 
-	if days > len(daysList) {
+	if days > len(daysList) || days == 0 {
 		days = len(daysList)
 	}
 	lastDays := daysList[len(daysList)-days:]
@@ -861,4 +862,12 @@ func lastEntryType() (string, error) {
 func isInteger(s string) bool {
 	_, err := strconv.Atoi(s)
 	return err == nil
+}
+
+func getTrailingCaratCount(s string) int {
+	count := 0
+	for i := len(s) - 1; i >= 0 && s[i] == '^'; i-- {
+		count++
+	}
+	return count
 }
